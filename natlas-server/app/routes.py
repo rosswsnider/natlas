@@ -12,13 +12,14 @@ import sys
 import traceback
 import ipaddress
 from datetime import datetime
+from libnmap.parser import NmapParser
 
 from app import app, elastic, db, ScopeManager
 from app import login as lm
 from app.models import User, ScopeItem
 from app.forms import *
 from app.email import send_password_reset_email, send_user_invite_email
-from .nmap_parser import NmapParser
+#from .nmap_parser import NmapParser
 from .util import *
 
 
@@ -544,21 +545,31 @@ def getwork():
 
 @app.route('/submit', methods=['POST'])
 def submit():
-    nmap = NmapParser()
     data = request.get_json()
 
     newhost = {}
     newhost = json.loads(data)
+    nmap_report = NmapParser.parse(newhost['xml_data'])
+    hosts_up = nmap_report.hosts_up
+    if nmap_report.hosts_up != 1:
+        return "[!] Host down"
+    host_address = nmap_report.hosts[0].address
+    host_names = nmap_report.hosts[0].hostnames
+    host_ports = nmap_report.hosts[0].get_open_ports()
+    ports = ""
+    for port in host_ports:
+        ports += str(port[0]) + ","
+    ports = ports[:-1]
+    scan_time = datetime.fromtimestamp(int(nmap_report.hosts[0].starttime))
+    print("Hosts Up: %s\nHost Address: %s\nHost Names: %s\nHost Ports: %s\nScan Time: %s\n" % (hosts_up, host_address, host_names, ports, scan_time))
 
-    if not nmap.has_scan_report(newhost['nmap_data']):
-        return "[!] No scan report found! Make sure your scan includes \"%s\"" % nmap.REPORT
 
     try:
-        newhost['ip'] = nmap.get_ip(newhost['nmap_data'])
+        newhost['ip'] = host_address
         if not isAcceptableTarget(newhost['ip']):
             return "[!] This address isn't in our authorized scope!"
-        newhost['hostname'] = nmap.get_hostname(newhost['nmap_data'])
-        newhost['ports'] = str(nmap.get_ports(newhost['nmap_data']))
+        newhost['hostname'] = host_names[0]
+        newhost['ports'] = ports
         newhost['ctime'] = datetime.now()
     except Exception as e:
         return "[!] Couldn't find necessary nmap_data\n" + str(e)
